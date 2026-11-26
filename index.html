@@ -857,5 +857,94 @@
         updateBadge();
     });
 </script>
+<script type="module">
+    // ننتظر حتى يتم تحميل الصفحة بالكامل
+    document.addEventListener("DOMContentLoaded", () => {
+        
+        // نستخدم مراقب (Observer) لمراقبة الشاشة ومتى يتم فتحها
+        const observer = new MutationObserver(async () => {
+            // البحث عن العنصر الذي يحتوي على النص "No pending withdrawals"
+            const elements = document.querySelectorAll('div, p, span');
+            let emptyDiv = null;
+            
+            elements.forEach(el => {
+                if (el.innerText === 'No pending withdrawals.' && el.offsetParent !== null) {
+                    emptyDiv = el;
+                }
+            });
+
+            // إذا وجدنا الشاشة الفارغة، نقوم بجلب البيانات وعرضها
+            if (emptyDiv && !emptyDiv.dataset.loaded) {
+                emptyDiv.dataset.loaded = "true"; // منع التكرار
+                emptyDiv.innerHTML = '<p style="color:#F5C518; text-align:center;">Loading all withdrawals...</p>';
+
+                try {
+                    const { getFirestore, collection, getDocs, query, orderBy } = await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js");
+                    const db = getFirestore();
+                    
+                    // جلب كل الطلبات مرتبة من الأحدث
+                    const q = query(collection(db, 'withdraw_requests'), orderBy('createdAt', 'desc'));
+                    const snapshot = await getDocs(q);
+
+                    if (snapshot.empty) {
+                        emptyDiv.innerHTML = '<p style="color:#999; text-align:center;">No withdrawals found.</p>';
+                        return;
+                    }
+
+                    let html = '';
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        const statusColor = data.status === 'paid' ? '#00D084' : (data.status === 'rejected' ? '#FF4757' : '#F5C518');
+                        const statusText = (data.status || 'pending').toUpperCase();
+                        const date = data.createdAt ? new Date(data.createdAt.seconds * 1000).toLocaleDateString() : '';
+
+                        html += `
+                            <div style="background: #1a1a1a; border-radius: 10px; padding: 15px; margin-bottom: 10px; border-left: 4px solid ${statusColor};">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                    <strong style="color: #fff;">${data.userName || 'Unknown'}</strong>
+                                    <span style="color: ${statusColor}; font-weight: bold; font-size: 12px;">${statusText}</span>
+                                </div>
+                                <div style="color: #F5C518; font-size: 18px; font-weight: bold;">$${data.amount}</div>
+                                <div style="color: #999; font-size: 11px; margin-top: 5px;">${data.userEmail || ''} | ${date}</div>
+                                ${data.status === 'pending' ? `
+                                    <div style="margin-top: 10px; display: flex; gap: 10px;">
+                                        <button onclick="window.approveWithdraw('${doc.id}')" style="flex:1; background:#00D084; color:#000; border:none; padding:8px; border-radius:5px; font-weight:bold;">Approve</button>
+                                        <button onclick="window.rejectWithdraw('${doc.id}')" style="flex:1; background:#FF4757; color:#fff; border:none; padding:8px; border-radius:5px; font-weight:bold;">Reject</button>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    });
+
+                    emptyDiv.innerHTML = html;
+
+                } catch (error) {
+                    console.error("Error loading withdrawals:", error);
+                    emptyDiv.innerHTML = '<p style="color:#FF4757; text-align:center;">Error loading data.</p>';
+                }
+            }
+        });
+
+        // بدء المراقبة
+        observer.observe(document.body, { childList: true, subtree: true });
+    });
+
+    // دوال للموافقة والرفض (لتحديث قاعدة البيانات مباشرة)
+    window.approveWithdraw = async (id) => {
+        if(!confirm('Mark this withdrawal as Paid?')) return;
+        const { getFirestore, doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js");
+        await updateDoc(doc(getFirestore(), 'withdraw_requests', id), { status: 'paid' });
+        alert('Marked as Paid!');
+        location.reload(); // إعادة تحميل لتحديث القائمة
+    };
+
+    window.rejectWithdraw = async (id) => {
+        if(!confirm('Reject this withdrawal?')) return;
+        const { getFirestore, doc, updateDoc } = await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js");
+        await updateDoc(doc(getFirestore(), 'withdraw_requests', id), { status: 'rejected' });
+        alert('Withdrawal Rejected!');
+        location.reload();
+    };
+</script>
 </body>
 </html>
